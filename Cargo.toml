@@ -1,0 +1,27 @@
+[package]
+name = "tin-sea-conn"
+version = "0.1.0"
+edition = "2024"
+authors = ["唐加彬 me@tangjiabin.cn"]
+description = "A simple and flexible database connection library for Rust based on SeaORM, supporting PostgreSQL, MySQL, and SQLite with configurable connection pooling"
+license = "MIT"
+repository = "https://github.com/JiabinTang/tin-sea-conn"
+homepage = "https://github.com/JiabinTang/tin-sea-conn"
+readme = "README.md"
+
+[lib]
+name = "tin_sea_conn"
+path = "src/lib.rs"
+
+[dependencies]
+log = "0"
+sea-orm = { version = "1", default-features = false, features = [
+    "macros",
+    "runtime-tokio-rustls",
+], optional = true }
+
+[features]
+default = []
+postgres = ["sea-orm", "sea-orm/sqlx-postgres"]
+mysql = ["sea-orm", "sea-orm/sqlx-mysql"]
+sqlite = ["sea-orm", "sea-orm/sqlx-sqlite"]
