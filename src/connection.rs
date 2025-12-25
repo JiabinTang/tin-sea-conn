@@ -5,6 +5,39 @@ use sea_orm::{ConnectOptions, Database, DatabaseConnection};
 #[cfg(any(feature = "postgres", feature = "mysql", feature = "sqlite"))]
 use std::time::Duration;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SslMode {
+    Disable,
+    Prefer,
+    Require,
+    VerifyCa,
+    VerifyFull,
+}
+
+impl SslMode {
+    #[cfg(feature = "postgres")]
+    fn as_postgres_param(self) -> &'static str {
+        match self {
+            SslMode::Disable => "disable",
+            SslMode::Prefer => "prefer",
+            SslMode::Require => "require",
+            SslMode::VerifyCa => "verify-ca",
+            SslMode::VerifyFull => "verify-full",
+        }
+    }
+
+    #[cfg(feature = "mysql")]
+    fn as_mysql_param(self) -> &'static str {
+        match self {
+            SslMode::Disable => "DISABLED",
+            SslMode::Prefer => "PREFERRED",
+            SslMode::Require => "REQUIRED",
+            SslMode::VerifyCa => "VERIFY_CA",
+            SslMode::VerifyFull => "VERIFY_IDENTITY",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum DatabaseType {
     #[cfg(feature = "postgres")]
@@ -24,6 +57,7 @@ pub struct DbConnector {
     username: Option<String>,
     password: Option<String>,
     database: Option<String>,
+    ssl_mode: Option<SslMode>,
     max_connections: Option<u32>,
     min_connections: Option<u32>,
     connect_timeout: Option<u64>,
@@ -48,6 +82,7 @@ impl DbConnector {
             username: None,
             password: None,
             database: None,
+            ssl_mode: None,
             max_connections: Some(10),
             min_connections: Some(1),
             connect_timeout: Some(30),
@@ -102,6 +137,16 @@ impl DbConnector {
         self
     }
 
+    /// Configure SSL/TLS mode for Postgres/MySQL connections.
+    ///
+    /// - Postgres uses `sslmode` (e.g. `require`, `verify-full`)
+    /// - MySQL uses `ssl-mode` (e.g. `REQUIRED`, `VERIFY_IDENTITY`)
+    /// - SQLite ignores this setting
+    pub fn ssl_mode(mut self, mode: SslMode) -> Self {
+        self.ssl_mode = Some(mode);
+        self
+    }
+
     pub fn max_connections(mut self, max: u32) -> Self {
         self.max_connections = Some(max);
         self
@@ -132,6 +177,19 @@ impl DbConnector {
         self
     }
 
+    #[cfg(any(feature = "postgres", feature = "mysql"))]
+    fn append_query_param(mut url: String, key: &str, value: &str) -> String {
+        if url.contains('?') {
+            url.push('&');
+        } else {
+            url.push('?');
+        }
+        url.push_str(key);
+        url.push('=');
+        url.push_str(value);
+        url
+    }
+
     #[cfg(any(feature = "postgres", feature = "mysql", feature = "sqlite"))]
     fn build_database_url(&self) -> Result<String, &'static str> {
         match &self.db_type {
@@ -143,9 +201,11 @@ impl DbConnector {
                 let password = self.password.as_ref().ok_or("Password is required")?;
                 let database = self.database.as_ref().ok_or("Database name is required")?;
 
-                Ok(format!(
-                    "postgres://{username}:{password}@{host}:{port}/{database}"
-                ))
+                let url = format!("postgres://{username}:{password}@{host}:{port}/{database}");
+                Ok(match self.ssl_mode {
+                    Some(mode) => Self::append_query_param(url, "sslmode", mode.as_postgres_param()),
+                    None => url,
+                })
             }
             #[cfg(feature = "mysql")]
             Some(DatabaseType::MySQL) => {
@@ -155,9 +215,11 @@ impl DbConnector {
                 let password = self.password.as_ref().ok_or("Password is required")?;
                 let database = self.database.as_ref().ok_or("Database name is required")?;
 
-                Ok(format!(
-                    "mysql://{username}:{password}@{host}:{port}/{database}",
-                ))
+                let url = format!("mysql://{username}:{password}@{host}:{port}/{database}");
+                Ok(match self.ssl_mode {
+                    Some(mode) => Self::append_query_param(url, "ssl-mode", mode.as_mysql_param()),
+                    None => url,
+                })
             }
             #[cfg(feature = "sqlite")]
             Some(DatabaseType::SQLite) => {
